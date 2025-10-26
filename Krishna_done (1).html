@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bill Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/2.1.5/tesseract.min.js"></script>
+    <style>
+        /* General body styling - This is the "normal" font */
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            color: #000000; /* text-black */
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start; /* Align to top */
+            min-height: 100vh; /* Ensure it takes full viewport height */
+        }
+        /* Container for the form and bill preview */
+        .main-container {
+            background-color: #fff;
+            padding: 2.5rem; /* p-10 equivalent */
+            border-radius: 1rem; /* rounded-2xl equivalent */
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1); /* shadow-2xl equivalent */
+            width: 100%;
+            max-width: 64rem; /* max-w-4xl equivalent, adjust if needed */
+            margin-top: 2rem; /* mx-auto my-10 equivalent, push down from top */
+            margin-bottom: 2rem;
+            box-sizing: border-box;
+        }
+
+        /* Styles for the bill preview itself to mimic a page */
+        #billPreview {
+            display: none; /* Hidden by default */
+            font-family: inherit; /* Use body font */
+            color: inherit;
+            width: 210mm; /* A4 width */
+            padding: 15mm;
+            margin: 0 auto; /* Center on the page/container */
+            box-sizing: border-box;
+            border: 1px solid #eee; /* Light border to define the page area */
+            box-shadow: 0 0 10px rgba(0,0,0,0.05); /* Subtle shadow for depth */
+            background-color: white;
+        }
+
+        /* Specific style for Mobile No. in the preview */
+        #previewMobileNo {
+            font-weight: 600; /* semi-bold */
+            color: #000000; /* text-black */
+        }
+        
+        /* Style for Party Name */
+        #previewPartyName {
+            font-weight: 600; /* semi-bold */
+            color: #000000; /* text-black */
+        }
+        
+        /* Style for clickable saved bill items */
+        .saved-bill-item {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .saved-bill-item:hover {
+            background-color: #f9fafb; /* gray-50 */
+        }
+
+        /* Print styles */
+        @media print {
+            body {
+                background: none;
+            }
+            .main-container {
+                box-shadow: none;
+                border: none;
+                padding: 0;
+                margin: 0;
+            }
+            #formContainer, #newBillContainer, #savedBillsContainer {
+                display: none !important;
+            }
+            #billPreview {
+                display: block !important;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+                box-shadow: none;
+                border: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+
+        <div class="flex justify-between items-center mb-6 pb-4 border-b">
+            <h1 class="text-3xl font-bold text-center text-black">Bill Generator</h1>
+            <div class="flex gap-2">
+                <button type="button" id="showFormButton" class="bg-blue-600 text-white py-2 px-4 rounded-md shadow-sm hover:bg-blue-700 transition-colors">Create New Bill</button>
+                <button type="button" id="showSavedBillsButton" class="bg-gray-600 text-white py-2 px-4 rounded-md shadow-sm hover:bg-gray-700 transition-colors">View Saved Bills</button>
+            </div>
+        </div>
+        
+        <div id="formContainer">
+            <form id="billForm">
+                <fieldset class="border border-gray-300 p-4 rounded-lg mb-6">
+                    <legend class="text-lg font-semibold text-gray-800 px-2">Auto-fill from PDF</legend>
+                    <div class="grid grid-cols-1 gap-4">
+                        <div>
+                            <label for="pdfUpload" class="block text-sm font-medium text-gray-700">Upload Bill (Optional)</label>
+                            <input type="file" id="pdfUpload" accept="application/pdf" class="mt-1 block w-full text-sm text-gray-500
+                                file:mr-4 file:py-2 file:px-4
+                                file:rounded-md file:border-0
+                                file:text-sm file:font-semibold
+                                file:bg-blue-50 file:text-blue-700
+                                hover:file:bg-blue-100
+                            "/>
+                        </div>
+                        <div id="pdfParsingIndicator" class="hidden text-sm text-blue-600 font-medium">
+                            <svg class="animate-spin h-5 w-5 mr-3 inline-block" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Parsing PDF, please wait... (This may take a moment for scanned bills)
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="border border-gray-300 p-4 rounded-lg mb-6">
+                    <legend class="text-lg font-semibold text-gray-800 px-2">Invoice Details</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="partyName" class="block text-sm font-medium text-gray-700">Party Name</label>
+                            <input type="text" id="partyName" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., krishna" required>
+                        </div>
+                        <div>
+                            <label for="mobileNo" class="block text-sm font-medium text-gray-700">Mobile No</label>
+                            <input type="tel" id="mobileNo" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., 7744015068">
+                        </div>
+                        <div>
+                            <label for="invoiceNo" class="block text-sm font-medium text-gray-700">Invoice No.</label>
+                            <input type="text" id="invoiceNo" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., 1001" required>
+                        </div>
+                        <div>
+                            <label for="dated" class="block text-sm font-medium text-gray-700">Dated</label>
+                            <input type="date" id="dated" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="border border-gray-300 p-4 rounded-lg mb-6">
+                    <legend class="text-lg font-semibold text-gray-800 px-2">Items</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-10 gap-4 items-end">
+                        <div class="md:col-span-4">
+                            <label for="descriptionOfGoods" class="block text-sm font-medium text-gray-700">Description of Goods</label>
+                            <input type="text" id="descriptionOfGoods" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="Item Description">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="IMEI" class="block text-sm font-medium text-gray-700">IMEI</label>
+                            <input type="text" id="IMEI" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., 15-digit number">
+                        </div>
+                        <div class="md:col-span-1">
+                            <label for="productQuantity" class="block text-sm font-medium text-gray-700">Qty</label>
+                            <input type="number" id="productQuantity" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="1" min="1">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="productRate" class="block text-sm font-medium text-gray-700">Rate (Incl. Tax) (₹)</label>
+                            <input type="number" id="productRate" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="100.00" step="0.01" min="0">
+                        </div>
+                        <div class="md:col-span-1">
+                            <button type="button" id="addProductButton" class="w-full bg-green-500 text-white py-2 px-4 rounded-md shadow-sm hover:bg-green-600 transition-colors mt-1">Add</button>
+                        </div>
+                    </div>
+                    
+                    <div id="productList" class="mt-4 space-y-2">
+                        </div>
+                </fieldset>
+
+                <div class="text-center">
+                    <button type="button" id="generateButton" class="w-full md:w-1/2 bg-blue-600 text-white py-3 px-6 rounded-lg text-lg font-semibold shadow-lg hover:bg-blue-700 transition-all transform hover:scale-105">
+                        Generate & Save Bill
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <div id="savedBillsContainer" class="hidden">
+            <h2 class="text-2xl font-semibold text-black mb-4">Saved Bills</h2>
+            <div id="loadingIndicator" class="text-center text-gray-600">Loading saved bills...</div>
+            <div id="savedBillsList" class="space-y-3">
+                </div>
+        </div>
+
+
+        <div id="newBillContainer" class="hidden text-center space-y-6">
+            <h2 id="successMessage" class="text-2xl font-semibold text-green-600">Bill Generated & Saved!</h2>
+            
+            <div class="flex flex-col md:flex-row items-center justify-center gap-4 p-4 bg-gray-50 rounded-lg border">
+                <span id="generatedPartyName" class="text-xl font-medium text-black"></span>
+                <div class="flex flex-col md:flex-row gap-3">
+                    <button type="button" id="downloadPdfButton" class="w-full md:w-auto bg-red-600 text-white py-2 px-5 rounded-lg font-semibold shadow-lg hover:bg-red-700 transition-all">
+                        Download as PDF
+                    </button>
+                    <button type="button" id="downloadImageButton" class="w-full md:w-auto bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold shadow-lg hover:bg-indigo-700 transition-all">
+                        Download as Image
+                    </button>
+                </div>
+            </div>
+
+            <button type="button" id="newBillButton" class="w-full md:w-1/2 bg-gray-700 text-white py-3 px-6 rounded-lg text-lg font-semibold shadow-lg hover:bg-gray-800 transition-all">
+                Create Another Bill
+            </button>
+        </div>
+
+        <div id="billPreview">
+            <header class="pb-4 border-b-2 border-gray-400">
+                <div class="text-center mb-2">
+                        <p class="text-xs text-black mt-1">SUBJECT TO KOLHAPUR JURISDICTION</p>
+                </div>
+                <div class="flex justify-between items-start mb-4">
+                    <div class="w-2/3">
+                        <h2 class="text-2xl font-bold text-black">PATIL COMMUNICATION</h2>
+                        <div class="text-xs text-black leading-tight">
+                            <p>CS NO 357/4/B/9/20, Near Ganesh Mandir Kaman,</p>
+                            <p>Main Road,, Uchagaon, Kolhapur,</p>
+                            <p>Maharashtra, 416005</p>
+                            <p>Contact No. 9270578571 / 7058297000</p>
+                            <p>E-Mail: jyotipatiltelecom@gmail.com</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                         <h2 class="text-3xl font-bold uppercase text-black">TAX INVOICE</h2>
+                    </div>
+                </div>
+                 <div class="flex justify-between items-start mb-2 text-xs">
+                    <div>
+                        <p class="text-black"><strong>GSTIN/UIN:</strong> 27BZGPP5505D1ZG</p>
+                        <p class="text-black"><strong>State Name:</strong> Maharashtra, Code: 27</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-sm text-black"><strong>Invoice No.:</strong> <span id="previewInvoiceNumber" class="font-semibold"></span></p>
+                        <p class="text-sm text-black"><strong>Dated:</strong> <span id="previewDate" class="font-semibold"></span></p>
+                    </div>
+                 </div>
+
+                <div class="flex justify-between text-xs">
+                    <div>
+                        <h3 class="text-sm font-semibold uppercase text-black mb-1">Party Name:</h3>
+                        <p id="previewPartyName" class="text-sm font-bold text-black">Party Name</p>
+                        <p id="previewMobileNo" class="text-xs">Mobile No</p>
+                    </div>
+                    <div class="text-right">
+                         <p class="text-black"><strong>State Name:</strong> Maharashtra, Code: 27</p>
+                    </div>
+                </div>
+            </header>
+
+            <section class="my-4">
+                <table class="w-full text-left border-collapse border border-gray-400">
+                    <thead class="bg-gray-100">
+                        <tr class="border-b border-gray-400">
+                            <th class="p-1 text-xs font-semibold uppercase text-black border-r border-gray-400">SI No</th>
+                            <th class="p-1 text-xs font-semibold uppercase text-black border-r border-gray-400">Description of Goods</th>
+                            <th class="p-1 text-xs font-semibold uppercase text-black text-center border-r border-gray-400">Quantity</th>
+                            <th class="p-1 text-xs font-semibold uppercase text-black text-right border-r border-gray-400">Rate</th>
+                            <th class="p-1 text-xs font-semibold uppercase text-black text-right">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody id="previewProductList">
+                        </tbody>
+                    <tfoot class="border-t-2 border-gray-400">
+                        <tr class="bg-gray-100">
+                            <td colspan="4" class="p-2 text-right text-sm font-bold text-black border-r border-gray-400">Total</td>
+                            <td id="previewTotal" class="p-2 text-right text-sm font-bold text-black">₹0.00</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </section>
+
+            <footer class="mt-4 pt-2 border-t-2 border-gray-400 text-xs">
+                <div class="mb-2">
+                    <p><strong>Amount Chargeable (in words):</strong></p>
+                    <p id="amountInWords" class="font-semibold">...</p>
+                </div>
+                
+                <div class="mb-2">
+                    <p><strong>Tax Amount (in words):</strong></p>
+                    <p id="taxInWords" class="font-semibold">...</p>
+                </div>
+
+                <div class="flex justify-between mt-4">
+                    <div>
+                        <h4 class="font-bold mb-1">Company's Bank Details</h4>
+                        <div class="text-xs text-black leading-tight">
+                            <p><strong>Bank Name:</strong> HDFC Bank-3110 (Current A/c)</p>
+                            <p><strong>A/c No.:</strong> 50200062603110</p>
+                            <p><strong>Branch & IFS:</strong> SHAHUPURI & HDFC0000164</p>
+                        </div>
+                    </div>
+                    <div class="text-right w-1/3">
+                        <p class="mb-16 font-bold">for PATIL COMMUNICATION</p>
+                        <p class="border-t border-gray-400 pt-1">Authorised Signatory</p>
+                    </div>
+                </div>
+                
+                <p class="text-center text-xs text-black mt-4">This is a Computer Generated Invoice</p>
+            </footer>
+        </div>
+        
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, doc, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Ensure libraries are loaded
+        const { jsPDF } = window.jspdf;
+        const html2canvas = window.html2canvas;
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        const Tesseract = window.Tesseract;
+
+        // Set worker paths for PDF.js and Tesseract
+        if (pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+        }
+
+        // --- NEW: Firebase State ---
+        let db, auth, userId, appId;
+        let billsColPath = ''; // To store the path to the user's bills
+        
+        // --- App State ---
+        let products = [];
+        let productCounter = 0;
+        let generatedPartyName = ''; // To store the party's name
+        let generatedCanvas = null; // To store the generated canvas
+        let currentBillData = null; // To store data for saving
+
+        // --- DOM Elements ---
+        const addProductButton = document.getElementById('addProductButton');
+        const generateButton = document.getElementById('generateButton');
+        const newBillButton = document.getElementById('newBillButton');
+        const downloadPdfButton = document.getElementById('downloadPdfButton');
+        const downloadImageButton = document.getElementById('downloadImageButton');
+        const showFormButton = document.getElementById('showFormButton');
+        const showSavedBillsButton = document.getElementById('showSavedBillsButton');
+
+        const descriptionInput = document.getElementById('descriptionOfGoods');
+        const IMEIInput = document.getElementById('IMEI');
+        const productQuantityInput = document.getElementById('productQuantity');
+        const productRateInput = document.getElementById('productRate');
+        const productListDiv = document.getElementById('productList');
+        
+        // NEW: PDF Upload Elements
+        const pdfUpload = document.getElementById('pdfUpload');
+        const pdfParsingIndicator = document.getElementById('pdfParsingIndicator');
+
+        const formContainer = document.getElementById('formContainer');
+        const newBillContainer = document.getElementById('newBillContainer');
+        const savedBillsContainer = document.getElementById('savedBillsContainer');
+        const savedBillsList = document.getElementById('savedBillsList');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const successMessage = document.getElementById('successMessage');
+
+        const billForm = document.getElementById('billForm');
+        const billPreview = document.getElementById('billPreview');
+
+        // --- NEW: Firebase Initialization ---
+        async function initializeFirebase() {
+            try {
+                // Get Firebase config and App ID from global scope (provided by environment)
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+                if (!firebaseConfig.apiKey) {
+                    console.error("Firebase config is missing.");
+                    loadingIndicator.textContent = "Error: Could not connect to server.";
+                    return;
+                }
+
+                // Initialize Firebase
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug'); // Enable Firestore logging
+
+                // Listen for auth state changes
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        // User is signed in
+                        userId = user.uid;
+                        console.log("User is signed in with UID:", userId);
+                        // Define the collection path for this user
+                        billsColPath = `/artifacts/${appId}/users/${userId}/bills`;
+                        // Load saved bills
+                        loadSavedBills();
+                    } else {
+                        // User is signed out, try to sign in
+                        console.log("User is signed out, attempting sign-in...");
+                        await signIn();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                loadingIndicator.textContent = "Error: Could not initialize app.";
+            }
+        }
+
+        async function signIn() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined') {
+                    // Use custom token if available
+                    console.log("Signing in with custom token...");
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    // Fallback to anonymous sign-in
+                    console.log("Signing in anonymously...");
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Error signing in:", error);
+                loadingIndicator.textContent = "Error: Authentication failed.";
+            }
+        }
+
+        // --- NEW: Firestore Data Functions ---
+
+        async function saveBillToFirestore() {
+            if (!db || !userId || !currentBillData) {
+                console.error("Firestore not initialized or no bill data to save.");
+                return;
+            }
+
+            try {
+                const docRef = await addDoc(collection(db, billsColPath), {
+                    ...currentBillData,
+                    createdAt: new Date() // Add a timestamp
+                });
+                console.log("Bill saved with ID: ", docRef.id);
+                successMessage.textContent = 'Bill Generated & Saved!';
+            } catch (error) {
+                console.error("Error saving bill: ", error);
+                successMessage.textContent = 'Bill Generated (Save Failed)';
+            }
+        }
+
+        function loadSavedBills() {
+            if (!db || !billsColPath) {
+                console.error("Firestore not initialized for loading bills.");
+                return;
+            }
+
+            console.log("Setting up snapshot listener for:", billsColPath);
+            const q = query(collection(db, billsColPath)); // Add orderBy('createdAt', 'desc') later if needed
+
+            onSnapshot(q, (snapshot) => {
+                loadingIndicator.style.display = 'none';
+                savedBillsList.innerHTML = ''; // Clear list
+
+                if (snapshot.empty) {
+                    savedBillsList.innerHTML = '<p class="text-gray-600 text-center">No saved bills found.</p>';
+                    return;
+                }
+
+                snapshot.forEach((doc) => {
+                    const bill = doc.data();
+                    const billId = doc.id;
+                    const billDate = bill.dated ? new Date(bill.dated).toLocaleDateString('en-GB') : 'N/A';
+                    
+                    const billElement = document.createElement('div');
+                    billElement.className = 'saved-bill-item flex justify-between items-center p-4 border rounded-lg';
+                    billElement.innerHTML = `
+                        <div>
+                            <p class="font-semibold text-black">Inv #${bill.invoiceNo} - ${bill.partyName}</p>
+                            <p class="text-sm text-gray-700">Date: ${billDate} | Total: ₹${bill.grandTotal.toFixed(2)}</p>
+                        </div>
+                        <button type="button" class="view-bill-btn bg-blue-500 text-white py-1 px-3 rounded-md text-sm hover:bg-blue-600">View</button>
+                    `;
+                    
+                    // Add click event to the button
+                    billElement.querySelector('.view-bill-btn').addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevent parent click
+                        handleViewSavedBill(billId);
+                    });
+
+                    savedBillsList.appendChild(billElement);
+                });
+
+            }, (error) => {
+                console.error("Error getting saved bills: ", error);
+                loadingIndicator.textContent = "Error loading bills.";
+                savedBillsList.innerHTML = '<p class="text-red-500 text-center">Could not load saved bills.</p>';
+            });
+        }
+        
+        async function handleViewSavedBill(billId) {
+            if (!db || !billsColPath) {
+                console.error("Firestore not initialized.");
+                return;
+            }
+            
+            console.log("Loading saved bill:", billId);
+            try {
+                const billDocRef = doc(db, billsColPath, billId);
+                const billDoc = await getDoc(billDocRef);
+
+                if (billDoc.exists()) {
+                    const billData = billDoc.data();
+                    
+                    // 1. Populate the preview
+                    populateBillPreview(billData);
+                    
+                    // 2. Show/Hide containers
+                    showView('preview');
+                    successMessage.textContent = 'Loaded Saved Bill'; // Change success message
+
+                    // 3. Generate canvas for downloading
+                    // --- FIX ---
+                    // The element ID is 'billPreview', not 'billScreen'.
+                    // The 'showView' function already makes 'billPreview' visible.
+                    generatedCanvas = await html2canvas(billPreview, { scale: 2 });
+                    // --- END FIX ---
+                    
+                    console.log("Saved bill loaded into preview.");
+                    
+                } else {
+                    console.error("No such document!");
+                }
+            } catch (error) {
+                console.error("Error loading document:", error);
+            }
+        }
+
+        // --- NEW: PDF Parsing and Data Extraction ---
+
+        pdfUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type === 'application/pdf') {
+                handlePdfUpload(file);
+            }
+        });
+
+        async function handlePdfUpload(file) {
+            pdfParsingIndicator.classList.remove('hidden');
+            const fileReader = new FileReader();
+
+            fileReader.onload = async (e) => {
+                try {
+                    const typedarray = new Uint8Array(e.target.result);
+                    const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
+                    let fullText = '';
+                    let isScanned = false;
+
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        
+                        if (textContent.items.length === 0) {
+                            // No text items, likely a scanned image
+                            isScanned = true;
+                            break; 
+                        }
+                        
+                        textContent.items.forEach((item) => {
+                            fullText += item.str + ' ';
+                        });
+                    }
+
+                    if (isScanned) {
+                        console.log("PDF appears to be scanned. Starting OCR...");
+                        fullText = ''; // Reset text
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const viewport = page.getViewport({ scale: 2.0 });
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+
+                            await page.render({ canvasContext: context, viewport: viewport }).promise;
+                            const imageData = canvas.toDataURL('image/png');
+
+                            const { data: { text } } = await Tesseract.recognize(imageData, 'eng');
+                            fullText += text + '\n';
+                        }
+                        console.log("OCR Complete.");
+                    }
+                    
+                    extractDataFromText(fullText);
+
+                } catch (error) {
+                    console.error('Error parsing PDF:', error);
+                    pdfParsingIndicator.textContent = 'Error parsing PDF.';
+                    pdfParsingIndicator.classList.replace('text-blue-600', 'text-red-600');
+                } finally {
+                    // Hide indicator after a short delay
+                    setTimeout(() => {
+                        pdfParsingIndicator.classList.add('hidden');
+                        pdfParsingIndicator.textContent = 'Parsing PDF, please wait...';
+                        pdfParsingIndicator.classList.replace('text-red-600', 'text-blue-600');
+                    }, 3000);
+                }
+            };
+            fileReader.readAsArrayBuffer(file);
+        }
+
+        function extractDataFromText(text) {
+            console.log("--- Extracted Text from PDF ---");
+            // console.log(text); // Uncomment this if you need to debug the full text
+            console.log("---------------------------------");
+
+            // ---
+            // --- CUSTOM LOGIC FOR 'Hemant Samal VIVO Y400.pdf' ---
+            // ---
+            // This logic is built specifically for the PDF you provided.
+            
+            let foundData = false;
+
+            // 1. Find Party Name
+            // Looks for "Mr/Miss/Mrs. [Name] has been"
+            const partyNameMatch = text.match(/Mr\/Miss\/Mrs\.\s*([A-Za-z\s]+)\s*has been/i);
+            if (partyNameMatch && partyNameMatch[1]) {
+                document.getElementById('partyName').value = partyNameMatch[1].trim();
+                console.log("Found Name:", partyNameMatch[1].trim());
+                foundData = true;
+            }
+
+            // 2. Find Mobile Number
+            // Looks for "Mobile Number: [10 digits]"
+            const mobileMatch = text.match(/Mobile Number:\s*(\d{10})/i);
+            if (mobileMatch && mobileMatch[1]) {
+                document.getElementById('mobileNo').value = mobileMatch[1];
+                console.log("Found Mobile:", mobileMatch[1]);
+                foundData = true;
+            }
+            
+            // 3. Find Date
+            // Looks for "Date: [dd/mm/yyyy]"
+            const dateMatch = text.match(/Date:\s*(\d{2}\/\d{2}\/\d{4})/i);
+            if (dateMatch && dateMatch[1]) {
+                // Convert dd/mm/yyyy to yyyy-mm-dd for the date input
+                const parts = dateMatch[1].split('/');
+                if (parts.length === 3) {
+                    const isoDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+                    document.getElementById('dated').value = isoDate;
+                    console.log("Found Date:", isoDate);
+                    foundData = true;
+                }
+            }
+
+            // 4. Find Model and Price to add as a product
+            // --- START: UPDATED REGEX ---
+            
+            // This regex is more flexible. It looks for the text between the word "Model"
+            // and the phrase "EAN Number". This avoids issues with exact model names
+            // or spacing, and it will capture the full description like
+            // "VIVO-MOBILE - Y400 5G(8+128G)".
+            const modelMatch = text.match(/Model\s+(.*?)\s+EAN Number/i);
+            
+            // This regex looks for "Product Price" followed by a number in the format xx,xxx.xx.
+            // It only captures the first price it finds, which is simpler and more reliable.
+            const priceMatch = text.match(/Product Price\s+([\d,]+\.\d{2})/i);
+            
+            // --- END: UPDATED REGEX ---
+
+            // We will ONLY fill the form fields and let the user click "Add".
+            if (modelMatch && modelMatch[1] && priceMatch && priceMatch[1]) {
+                const description = modelMatch[1].trim();
+                // Remove commas from price before parsing (e.g., "21,999.00" -> 21999.00)
+                const inclusiveRate = parseFloat(priceMatch[1].replace(/,/g, ''));
+                const quantity = 1;
+                
+                console.log("Found Product:", description, "Price:", inclusiveRate);
+
+                // Clear any existing products from the list (in case of re-upload)
+                products = [];
+                renderProductList();
+                
+                // Pre-fill the form fields INSTEAD of adding to the list
+                document.getElementById('descriptionOfGoods').value = description;
+                document.getElementById('productRate').value = inclusiveRate.toFixed(2);
+                document.getElementById('productQuantity').value = 1;
+                
+                // Focus the IMEI field so user can type it
+                document.getElementById('IMEI').focus();
+                
+                foundData = true;
+            }
+            
+            if (!foundData) {
+                console.log("Could not extract data. The PDF layout might be different.");
+                // Let the user know
+                pdfParsingIndicator.textContent = 'Could not automatically read data from this PDF.';
+                pdfParsingIndicator.classList.replace('text-blue-600', 'text-red-600');
+            } else {
+                 console.log("Successfully extracted data from PDF.");
+                 pdfParsingIndicator.textContent = 'Data extracted successfully! Please enter IMEI and click Add.';
+                 pdfParsingIndicator.classList.replace('text-blue-600', 'text-green-600');
+            }
+            
+            // --- End of Custom Logic Section ---
+        }
+
+
+        // --- Product Management ---
+
+        function renderProductList() {
+            productListDiv.innerHTML = ''; // Clear existing list
+            
+            if (products.length === 0) {
+                productListDiv.innerHTML = '<p class="text-gray-600 text-sm text-center">No items added yet.</p>';
+                return;
+            }
+
+            products.forEach(product => {
+                const productElement = document.createElement('div');
+                productElement.className = 'flex justify-between items-center bg-gray-50 p-3 rounded-md border';
+                
+                const IMEIHTML = product.IMEI ? `IMEI: ${product.IMEI} | ` : '';
+                const inclusiveRateDisplay = (product.preTaxRate * 1.18).toFixed(2);
+                const inclusiveAmountDisplay = (product.amount * 1.18).toFixed(2);
+
+                productElement.innerHTML = `
+                    <div class="flex-1">
+                        <p class="font-semibold text-gray-900">${product.description}</p>
+                        <p class="text-sm text-gray-700">${IMEIHTML}Qty: ${product.quantity} @ ₹${inclusiveRateDisplay} (Incl.)</p>
+                    </div>
+                    <p class="text-md font-semibold text-gray-900 w-24 text-right">₹${inclusiveAmountDisplay}</p>
+                    <button type="button" onclick="removeProduct(${product.id})" class="ml-4 text-red-500 hover:text-red-700 font-bold text-lg">&times;</button>
+                `;
+                productListDiv.appendChild(productElement);
+            });
+        }
+
+        function handleAddProduct() {
+            const description = descriptionInput.value.trim();
+            const IMEI = IMEIInput.value.trim(); 
+            const quantity = parseInt(productQuantityInput.value);
+            const inclusiveRate = parseFloat(productRateInput.value);
+
+            if (!description || isNaN(quantity) || quantity <= 0 || isNaN(inclusiveRate) || inclusiveRate < 0) {
+                console.error("Invalid item details");
+                descriptionInput.focus();
+                return;
+            }
+
+            const preTaxRate = inclusiveRate / 1.18;
+            const amount = preTaxRate * quantity; // This is the pre-tax amount
+
+            products.push({
+                id: productCounter++,
+                description: description,
+                IMEI: IMEI, 
+                quantity: quantity,
+                preTaxRate: preTaxRate, 
+                amount: amount // Store pre-tax amount
+            });
+
+            // Reset inputs
+            descriptionInput.value = '';
+            IMEIInput.value = ''; 
+            productQuantityInput.value = '';
+            productRateInput.value = '';
+
+            renderProductList();
+            descriptionInput.focus();
+        }
+
+        window.removeProduct = function(id) {
+            products = products.filter(product => product.id !== id);
+            renderProductList();
+        }
+
+        addProductButton.addEventListener('click', handleAddProduct);
+        
+        // --- Bill Generation (Display) ---
+        
+        function populateBillPreview(sourceData) {
+            let partyName, mobileNo, invoiceNo, dated, items, subtotal, cgst, sgst, grandTotal;
+
+            if (sourceData) {
+                // Use data from a saved bill
+                partyName = sourceData.partyName;
+                mobileNo = sourceData.mobileNo;
+                invoiceNo = sourceData.invoiceNo;
+                dated = sourceData.dated;
+                items = sourceData.items; // This is the 'products' array
+                subtotal = sourceData.subtotal;
+                cgst = sourceData.cgst;
+                sgst = sourceData.sgst;
+                grandTotal = sourceData.grandTotal;
+            } else {
+                // Use data from the form
+                partyName = document.getElementById('partyName').value;
+                mobileNo = document.getElementById('mobileNo').value;
+                invoiceNo = document.getElementById('invoiceNo').value;
+                dated = document.getElementById('dated').value;
+                items = products; // Use the current products array
+                
+                // Recalculate totals
+                subtotal = 0;
+                items.forEach(product => {
+                    subtotal += product.amount;
+                });
+                cgst = subtotal * 0.09;
+                sgst = subtotal * 0.09;
+                grandTotal = subtotal + cgst + sgst;
+                
+                // Store data for saving
+                currentBillData = {
+                    partyName, mobileNo, invoiceNo, dated, items, subtotal, cgst, sgst, grandTotal
+                };
+            }
+            
+            // Format date
+            const formattedDate = dated ? new Date(dated).toLocaleDateString('en-GB') : 'N/A'; // dd/mm/yyyy
+
+            // Populate header and customer info
+            document.getElementById('previewPartyName').textContent = partyName;
+            document.getElementById('previewMobileNo').textContent = `Mobile: ${mobileNo}`;
+            document.getElementById('previewInvoiceNumber').textContent = invoiceNo;
+            document.getElementById('previewDate').textContent = formattedDate;
+
+            // Populate product table
+            const previewProductList = document.getElementById('previewProductList');
+            previewProductList.innerHTML = '';
+            let siNo = 1;
+
+            items.forEach(product => {
+                const descriptionHTML = product.IMEI ? 
+                    `${product.description}<br><span class="text-xs text-gray-600">IMEI: ${product.IMEI}</span>` : 
+                    product.description;
+
+                const row = document.createElement('tr');
+                row.className = 'border-b border-gray-400';
+                row.innerHTML = `
+                    <td class="p-1 text-xs border-r border-gray-400 align-top">${siNo++}</td>
+                    <td class="p-1 text-xs border-r border-gray-400 align-top">${descriptionHTML}</td>
+                    <td class="p-1 text-xs text-center border-r border-gray-400 align-top">${product.quantity}</td>
+                    <td class="p-1 text-xs text-right border-r border-gray-400 align-top">₹${product.preTaxRate.toFixed(2)}</td>
+                    <td class="p-1 text-xs text-right align-top">₹${product.amount.toFixed(2)}</td>
+                `;
+                previewProductList.appendChild(row);
+            });
+
+            // Add Subtotal Row
+            const subtotalRow = document.createElement('tr');
+            subtotalRow.className = 'border-b border-gray-400';
+            subtotalRow.innerHTML = `
+                <td colspan="4" class="p-1 text-xs text-right font-semibold border-r border-gray-400">Subtotal</td>
+                <td class="p-1 text-xs text-right font-semibold">₹${subtotal.toFixed(2)}</td>
+            `;
+            previewProductList.appendChild(subtotalRow);
+            
+            // ADDED: CGST Row
+            const cgstRow = document.createElement('tr');
+            cgstRow.className = 'border-b border-gray-400';
+            cgstRow.innerHTML = `
+                <td colspan="4" class="p-1 text-xs text-right font-semibold border-r border-gray-400">CGST @ 9%</td>
+                <td class="p-1 text-xs text-right">₹${cgst.toFixed(2)}</td>
+            `;
+            previewProductList.appendChild(cgstRow);
+
+            // ADDED: SGST Row
+            const sgstRow = document.createElement('tr');
+            sgstRow.className = 'border-b border-gray-400';
+            sgstRow.innerHTML = `
+                <td colspan="4" class="p-1 text-xs text-right font-semibold border-r border-gray-400">SGST @ 9%</td>
+                <td class="p-1 text-xs text-right">₹${sgst.toFixed(2)}</td>
+            `;
+            previewProductList.appendChild(sgstRow);
+
+
+            // Populate total in footer (now Grand Total)
+            document.getElementById('previewTotal').textContent = `₹${grandTotal.toFixed(2)}`;
+            
+            // Populate amounts in words
+            document.getElementById('amountInWords').textContent = `INR ${numToWords(grandTotal)} Only`;
+            document.getElementById('taxInWords').textContent = `INR ${numToWords(cgst + sgst)} Only`;
+            
+            generatedPartyName = partyName; // Store party name for the "Bill Ready" message
+        }
+
+        async function handleGenerateBill() {
+            if (!billForm.checkValidity()) {
+                billForm.reportValidity();
+                return;
+            }
+            if (products.length === 0) {
+                console.error("Please add at least one item.");
+                return;
+            }
+
+            generateButton.disabled = true;
+            generateButton.textContent = 'Generating...';
+
+            // 1. Populate preview from form data
+            populateBillPreview(null);
+            
+            // 2. Save the bill data (currentBillData is set in populateBillPreview)
+            await saveBillToFirestore(); 
+            
+            // 3. Show the bill preview so html2canvas can capture it
+            billPreview.style.display = 'block';
+            
+            try {
+                // 4. Capture the canvas
+                generatedCanvas = await html2canvas(billPreview, { scale: 2 });
+            } catch (error) {
+                console.error("Error capturing canvas:", error);
+                generateButton.disabled = false;
+                generateButton.textContent = 'Generate & Save Bill';
+                billPreview.style.display = 'none'; // Hide preview on error
+                return;
+            }
+
+            // 5. Hide form, show download options
+            showView('preview');
+            document.getElementById('generatedPartyName').textContent = generatedPartyName;
+            
+            // 6. Re-enable button
+            generateButton.disabled = false;
+            generateButton.textContent = 'Generate & Save Bill';
+        }
+
+        generateButton.addEventListener('click', handleGenerateBill);
+
+        // --- Download Functions ---
+
+        function getFilename() {
+            const partyName = generatedPartyName.replace(/ /g, '_') || 'Party';
+            const invoiceNo = document.getElementById('previewInvoiceNumber').textContent || 'bill';
+            return `Invoice_${invoiceNo}_${partyName}`;
+        }
+
+        function handleDownloadPdf() {
+            if (!generatedCanvas) {
+                console.error("No bill canvas found. Please generate bill first.");
+                return;
+            }
+            
+            try {
+                const imgData = generatedCanvas.toDataURL('image/png');
+                const doc = new jsPDF({
+                    orientation: 'p',
+                    unit: 'mm',
+                    format: 'a4'
+                });
+
+                const imgProps = doc.getImageProperties(imgData);
+                const pdfWidth = doc.internal.pageSize.getWidth();
+                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+                const pageHeight = doc.internal.pageSize.getHeight();
+
+                let heightLeft = pdfHeight;
+                let position = 0;
+
+                doc.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft > 0) {
+                    position = heightLeft - pdfHeight;
+                    doc.addPage();
+                    doc.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                    heightLeft -= pageHeight;
+                }
+                
+                doc.save(`${getFilename()}.pdf`);
+
+            } catch (error) {
+                console.error("Error saving PDF:", error);
+            }
+        }
+        downloadPdfButton.addEventListener('click', handleDownloadPdf);
+
+
+        function handleDownloadImage() {
+            if (!generatedCanvas) {
+                console.error("No bill canvas found. Please generate bill first.");
+                return;
+            }
+            
+            try {
+                const imgData = generatedCanvas.toDataURL('image/png');
+                
+                const link = document.createElement('a');
+                link.href = imgData;
+                link.download = `${getFilename()}.png`;
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+            } catch (error) {
+                console.error("Error saving image:", error);
+            }
+        }
+        downloadImageButton.addEventListener('click', handleDownloadImage);
+
+
+        // --- NEW: View Navigation ---
+        
+        function showView(viewName) {
+            // Hide all main containers
+            formContainer.classList.add('hidden');
+            newBillContainer.classList.add('hidden');
+            savedBillsContainer.classList.add('hidden');
+            billPreview.style.display = 'none'; // Also hide preview
+            
+            // Reset button styles
+            showFormButton.classList.replace('bg-blue-700', 'bg-blue-600');
+            showSavedBillsButton.classList.replace('bg-gray-700', 'bg-gray-600');
+
+            if (viewName === 'form') {
+                formContainer.classList.remove('hidden');
+                showFormButton.classList.replace('bg-blue-600', 'bg-blue-700');
+            } else if (viewName === 'saved') {
+                savedBillsContainer.classList.remove('hidden');
+                showSavedBillsButton.classList.replace('bg-gray-600', 'bg-gray-700');
+            } else if (viewName === 'preview') {
+                newBillContainer.classList.remove('hidden');
+                billPreview.style.display = 'block'; // Keep preview visible with download buttons
+            }
+        }
+
+        showFormButton.addEventListener('click', () => {
+            handleNewBill(); // Reset form when clicking "Create New Bill"
+            showView('form');
+        });
+        
+        showSavedBillsButton.addEventListener('click', () => {
+            showView('saved');
+        });
+
+        // --- New Bill ---
+
+        function handleNewBill() {
+            // Reset form
+            billForm.reset();
+            
+            // Clear state
+            products = [];
+            productCounter = 0;
+            generatedPartyName = '';
+            generatedCanvas = null; // Clear the canvas
+            currentBillData = null; // Clear data
+            
+            // Update UI
+            renderProductList();
+            document.getElementById('generatedPartyName').textContent = '';
+            
+            // Show the form
+            showView('form');
+        }
+
+        newBillButton.addEventListener('click', handleNewBill);
+        
+        // --- Initial Render ---
+        renderProductList(); // Show "No items" message on load
+        document.getElementById('dated').valueAsDate = new Date(); // Set default date
+        showView('form'); // Show form by default
+
+        // --- Start Firebase ---
+        initializeFirebase();
+
+        // --- Number to Words Converter (Simple) ---
+        function numToWords(num) {
+            num = Math.round(num * 100) / 100;
+
+            const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+            const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+            
+            const [integerPart, decimalPart] = num.toFixed(2).split('.');
+
+            let words = convertToWords(integerPart);
+            if (words === '') words = 'Zero';
+            
+            let decimalWords = '';
+            if (decimalPart && parseInt(decimalPart) > 0) {
+                let paise = parseInt(decimalPart);
+                if (paise > 0) {
+                    if (paise < 20) {
+                        decimalWords = a[paise];
+                    } else {
+                        decimalWords = b[Math.floor(paise / 10)] + (paise % 10 !== 0 ? ' ' + a[paise % 10] : '');
+                    }
+                    words += ` and ${decimalWords} Paise`;
+                }
+            }
+
+            return words.trim();
+
+            function convertToWords(n) { // n is a string
+                if (n === '0') return ''; 
+                let str = '';
+                
+                n = n.padStart(9, '0');
+                
+                let match = n.match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
+                if (!match) return '';
+                
+                let crore = match[1];
+                let lakh = match[2];
+                let thousand = match[3];
+                let hundred = match[4];
+                let tens = match[5];
+
+                if (crore != '00') {
+                    str += (a[Number(crore)] || b[crore[0]] + ' ' + a[crore[1]]) + ' Crore ';
+                }
+                if (lakh != '00') {
+                    str += (a[Number(lakh)] || b[lakh[0]] + ' ' + a[lakh[1]]) + ' Lakh ';
+                }
+                if (thousand != '00') {
+                    str += (a[Number(thousand)] || b[thousand[0]] + ' ' + a[thousand[1]]) + ' Thousand ';
+                }
+                if (hundred != '0') {
+                    str += (a[Number(hundred)] || b[hundred[0]] + ' ' + a[hundred[1]]) + ' Hundred ';
+                }
+                if (tens != '00') {
+                    str += ((str != '') ? 'and ' : '') + (a[Number(tens)] || b[tens[0]] + ' ' + a[tens[1]]);
+                }
+                return str.replace(/\s+/g, ' ').trim();
+            }
+        }
+
+    </script>
+</body>
+</html>
